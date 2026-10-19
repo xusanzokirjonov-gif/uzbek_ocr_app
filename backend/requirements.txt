@@ -1,0 +1,43 @@
+# ─── Uzbek OCR Backend — Python Dependencies ──────────────────────────────────
+#
+# Зависимости разбиты по категориям для удобства понимания.
+# Версии зафиксированы для воспроизводимости в дипломной работе.
+
+# ── Web Framework ────────────────────────────────────────────────────────────
+fastapi==0.115.5          # Современный async REST framework
+uvicorn[standard]==0.32.1 # ASGI-сервер с поддержкой WebSocket и HTTP/2
+python-multipart==0.0.12  # Обработка multipart/form-data (загрузка файлов)
+
+# ── Async Task Queue (Celery + Redis) ────────────────────────────────────────
+#
+# celery[redis] — включает redis как брокер и backend результатов.
+# Пакет redis устанавливается автоматически как зависимость celery[redis].
+# kombu — транспортный слой Celery (очереди, AMQP-абстракция).
+#
+# Версия 5.4.x — последний стабильный релиз с поддержкой Python 3.10+.
+# Совместимость с Redis 7.x подтверждена.
+celery[redis]==5.4.0      # Фреймворк распределённых задач
+redis==5.2.1              # Python-клиент Redis (используется Celery backend)
+
+# ── OCR Engine ───────────────────────────────────────────────────────────────
+easyocr==1.7.2            # OCR-движок на базе CRAFT + CRNN
+
+# ── Deep Learning (CPU-only) ─────────────────────────────────────────────────
+# CPU-версия PyTorch устанавливается отдельно через --extra-index-url.
+# Инструкция: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1              # Нейронные сети (CPU)
+torchvision==0.20.1       # Утилиты для работы с изображениями
+
+# ── Image Processing ─────────────────────────────────────────────────────────
+Pillow==11.0.0            # Загрузка и обработка изображений (PIL)
+opencv-python-headless==4.10.0.84  # OpenCV без GUI (для предобработки)
+numpy==1.26.4             # Массивы для передачи в EasyOCR/OpenCV
+
+# ── Utilities ────────────────────────────────────────────────────────────────
+python-jose==3.3.0        # JWT (если нужна аутентификация)
+pydantic==2.10.3          # Валидация данных (встроена в FastAPI)
+
+# ── mDNS / Zero-Configuration Networking ─────────────────────────────────────
+# Позволяет мобильному приложению находить сервер по имени uzbek-ocr.local
+# вместо хардкода IP-адреса. Использует протокол Zeroconf/Bonjour (RFC 6762).
+zeroconf==0.136.2         # mDNS + DNS-SD (service discovery в локальной сети)

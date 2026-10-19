@@ -1,0 +1,36 @@
+name: uzbek_ocr_app
+description: "Uzbek OCR - Automatic text recognition in the Uzbek language using neural networks."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  image_picker: ^1.1.2
+  http: ^1.2.2
+  google_fonts: ^6.2.1
+  flutter_animate: ^4.5.0
+  provider: ^6.1.2
+  shared_preferences: ^2.3.2   # Остаётся для SettingsService
+  share_plus: ^10.1.3
+  # ── Локальная NoSQL база данных ──────────────────────────────
+  hive: ^2.2.3           # Основной пакет Hive
+  hive_flutter: ^1.1.0   # Flutter-интеграция (инициализация, path_provider)
+  uuid: ^4.4.0            # FIX #5: UUID v4 для уникальных ID истории
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  # ── Кодогенерация TypeAdapter (опционально) ──────────────────
+  # Запуск: flutter pub run build_runner build --delete-conflicting-outputs
+  build_runner: ^2.4.13
+  hive_generator: ^2.0.1
+
+flutter:
+  uses-material-design: true

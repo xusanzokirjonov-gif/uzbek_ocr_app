@@ -1,0 +1,56 @@
+# .dockerignore
+# Исключаем лишние файлы из Docker build context
+
+# Python артефакты
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Виртуальное окружение (устанавливается в Docker)
+venv/
+.venv/
+env/
+ENV/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Тренировочные данные (не нужны в runtime)
+training/
+data/
+
+# Документация
+README.md
+*.md
+
+# Vercel (не используется в Docker)
+vercel.json
+.vercelignore
+
+# Логи
+*.log
+logs/
+
+# Тесты
+tests/
+test_*.py
+*_test.py

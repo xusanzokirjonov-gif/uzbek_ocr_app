@@ -1,0 +1,68 @@
+# Виртуальные окружения Python
+venv/
+.venv/
+env/
+backend/venv/
+backend/.venv/
+backend/env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Веса моделей и датасеты
+*.pth
+*.pt
+*.bin
+*.onnx
+*.dmg
+models/
+.EasyOCR/
+backend/data/
+backend/model/*.pth
+backend/training/saved_models/
+
+# Flutter / Dart / Сборки
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+*.iml
+
+# iOS / macOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/flutter_export_environment.sh
+*.xcworkspace
+!ios/Runner.xcworkspace
+macos/Pods/
+macos/.symlinks/
+macos/Flutter/ephemeral/
+iphonesimulator_*/
+*.exportedBundle/
+
+# Android
+android/.gradle/
+android/local.properties
+android/key.properties
+android/app/google-services.json
+android/captures/
+
+# Системные и IDE файлы
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Секреты и логи
+*.pem
+*.key
+*.env
+.env.*
+*.log
+backend/uploads/

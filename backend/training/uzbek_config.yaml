@@ -1,0 +1,66 @@
+# ===========================================================================
+# Uzbek OCR Training Configuration
+# ===========================================================================
+# Character sets used by the model.
+# `lang_char` is the full alphabet — Latin + Cyrillic Uzbek characters.
+# During training the effective character list is: number + symbol + lang_char
+# ===========================================================================
+
+number: '0123456789'
+symbol: "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~ "
+lang_char: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzʻАБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЪЬЭЮЯабвгдеёжзийклмнопрстуфхцчшъьэюяЎўҚқҒғҲҳ"
+
+# ---------------------------------------------------------------------------
+# Experiment
+# ---------------------------------------------------------------------------
+experiment_name: 'uzbek_ocr'
+train_data: 'all_data'
+valid_data: 'all_data/val'
+select_data: 'train'
+batch_ratio: '1'
+
+# ---------------------------------------------------------------------------
+# Training hyper-parameters
+# ---------------------------------------------------------------------------
+manualSeed: 1111
+workers: 4
+batch_size: 16
+num_iter: 10000
+valInterval: 500
+saved_model: ''
+FT: false            # Fine-tune from a pretrained model
+optim: false          # Use Adadelta (true) or Adam (false)
+lr: 1.0
+beta1: 0.9
+rho: 0.95
+eps: 1.0e-08
+grad_clip: 5
+
+# ---------------------------------------------------------------------------
+# Data
+# ---------------------------------------------------------------------------
+total_data_usage_ratio: 1.0
+batch_max_length: 40
+imgH: 64
+imgW: 600
+rgb: false
+contrast_adjust: 0.0
+sensitive: true       # Case-sensitive recognition
+PAD: true             # Pad images to imgW
+data_filtering_off: false
+
+# ---------------------------------------------------------------------------
+# Model architecture
+# ---------------------------------------------------------------------------
+Transformation: 'None'
+FeatureExtraction: 'VGG'
+SequenceModeling: 'BiLSTM'
+Prediction: 'CTC'
+num_fiducial: 20
+input_channel: 1
+output_channel: 256
+hidden_size: 256
+decode: 'greedy'
+new_prediction: false
+freeze_FeatureFxtraction: false
+freeze_SequenceModeling: false

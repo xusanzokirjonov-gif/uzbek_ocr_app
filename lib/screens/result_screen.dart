@@ -1,0 +1,717 @@
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../services/api_service.dart';
+import '../services/history_service.dart';
+import '../services/converter_service.dart';
+import '../services/server_discovery_service.dart';
+import '../services/settings_service.dart';
+
+class ResultScreen extends StatefulWidget {
+  final Uint8List imageBytes;
+  final String imagePath;
+
+  const ResultScreen({super.key, required this.imageBytes, required this.imagePath});
+
+  @override
+  State<ResultScreen> createState() => _ResultScreenState();
+}
+
+class _ResultScreenState extends State<ResultScreen> {
+  bool _isLoading = true;
+  String _recognizedText = '';
+  double _confidence = 0.0;
+  bool _isDemo = false;
+  String? _error;
+  bool _isEditing = false;
+  late TextEditingController _editController;
+
+  // FIX #4: токен отмены для прерывания polling-цикла при dispose()
+  final OcrCancelToken _cancelToken = OcrCancelToken();
+
+  // ── Поля для асинхронного OCR-прогресса ───────────────────────────────
+  int _ocrProgress = 0;
+  String _ocrStage   = 'pending';
+  String _ocrMessage = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _editController = TextEditingController();
+    _performOCR();
+  }
+
+  @override
+  void dispose() {
+    // FIX #4: отменяем polling-цикл чтобы он не вызывал setState
+    // после того как виджет уже unmounted (crash / setState on dead widget)
+    _cancelToken.cancel();
+    _editController.dispose();
+    super.dispose();
+  }
+
+  void _openFullscreen(BuildContext context) {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black,
+        pageBuilder: (_, _, _) => _FullscreenImagePage(imageBytes: widget.imageBytes),
+        transitionsBuilder: (_, anim, _, child) => FadeTransition(opacity: anim, child: child),
+      ),
+    );
+  }
+
+  Future<void> _performOCR() async {
+    setState(() {
+      _isLoading = true;
+      _error     = null;
+      _ocrProgress = 0;
+      _ocrStage    = 'pending';
+      _ocrMessage  = '';
+    });
+
+    final settings = context.read<SettingsService>();
+    final discovery = context.read<ServerDiscoveryService>();
+
+    // Получаем URL: авто-обнаруженный или из сохранённых настроек
+    final serverUrl = discovery.discoveredUrl ?? settings.serverUrl;
+
+    // ── Выбор метода: v2 (асинхронный) или v1 (синхронный) ────────────────
+    //
+    // useAsyncOcr читается из SettingsService.
+    // Если true — используем /ocr/v2 (Celery + Redis).
+    // Если false — используем /ocr (cинхронный блокирующий).
+    final Map<String, dynamic> result;
+
+    if (settings.useAsyncOcr) {
+      // v2: асинхронный режим с polling и progress-индикатором
+      result = await ApiService.recognizeTextAsync(
+        widget.imageBytes,
+        widget.imagePath.split('/').last,
+        baseUrl: serverUrl,
+        // FIX #4: передаём cancelToken — при dispose() polling немедленно остановится
+        cancelToken: _cancelToken,
+        onProgress: (progress, stage, message) {
+          if (mounted) {
+            setState(() {
+              _ocrProgress = progress;
+              _ocrStage    = stage;
+              _ocrMessage  = message;
+            });
+          }
+        },
+      );
+
+      // FIX #4: если polling был отменён (пользователь нажал «Назад») — молча выходим
+      if (result['cancelled'] == true) return;
+    } else {
+      // v1: синхронный режим (POST /ocr)
+      result = await ApiService.recognizeText(
+        widget.imageBytes,
+        widget.imagePath.split('/').last,
+        baseUrl: serverUrl,
+      );
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _isLoading = false;
+      if (result['success'] == true) {
+        _recognizedText = result['correctedText'] as String? ?? '';
+        _confidence     = (result['confidence']   as num?)?.toDouble() ?? 0.0;
+        _isDemo         = false;
+
+        // Сохраняем запись в Hive через HistoryService
+        final item = createHistoryItem(
+          originalText:  result['originalText']  as String? ?? _recognizedText,
+          correctedText: result['correctedText'] as String? ?? _recognizedText,
+          convertedText: result['convertedText'] as String? ?? '',
+          confidence:    _confidence,
+          imagePath:     widget.imagePath,
+        );
+        context.read<HistoryService>().addItem(item);
+      } else {
+        final settings = context.read<SettingsService>();
+        _error = result['error'] as String? ?? settings.t('unknown_error');
+      }
+    });
+  }
+
+  void _copyText(SettingsService settings) {
+    Clipboard.setData(ClipboardData(text: _recognizedText));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Colors.white, size: 20),
+            const SizedBox(width: 8),
+            Text(settings.t('copied'), style: GoogleFonts.inter()),
+          ],
+        ),
+        backgroundColor: const Color(0xFF6C63FF),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  void _toggleEdit() {
+    setState(() {
+      if (_isEditing) {
+        _recognizedText = _editController.text;
+      } else {
+        _editController.text = _recognizedText;
+      }
+      _isEditing = !_isEditing;
+    });
+  }
+
+  void _convertText() {
+    setState(() {
+      _recognizedText = UzbekConverter.autoConvert(_recognizedText);
+      if (_isEditing) {
+        _editController.text = _recognizedText;
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<SettingsService>(
+      builder: (context, settings, _) {
+        final sys = MediaQuery.platformBrightnessOf(context);
+        settings.updateSystemBrightness(sys);
+        return Scaffold(
+          body: AnimatedContainer(
+            duration: const Duration(milliseconds: 400),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: settings.backgroundGradient,
+              ),
+            ),
+            child: SafeArea(
+              child: Column(
+                children: [
+                  // App Bar
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    child: Row(
+                      children: [
+                        IconButton(
+                          onPressed: () => Navigator.pop(context),
+                          icon: Icon(Icons.arrow_back_ios_rounded, color: settings.textColor),
+                        ),
+                        Text(
+                          settings.t('result'),
+                          style: GoogleFonts.inter(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            color: settings.textColor,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (!_isLoading && _recognizedText.isNotEmpty)
+                          IconButton(
+                            onPressed: () => _copyText(settings),
+                            icon: Icon(Icons.copy_rounded, color: settings.subtitleColor),
+                          ),
+                      ],
+                    ),
+                  ),
+
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Image Preview — tap to fullscreen
+                          GestureDetector(
+                            onTap: () => _openFullscreen(context),
+                            child: Hero(
+                              tag: 'ocr_image',
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(20),
+                                child: Stack(
+                                  children: [
+                                    Container(
+                                      constraints: const BoxConstraints(maxHeight: 250),
+                                      width: double.infinity,
+                                      child: Image.memory(widget.imageBytes, fit: BoxFit.cover),
+                                    ),
+                                    Positioned(
+                                      right: 10,
+                                      bottom: 10,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(alpha: 0.5),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Icon(Icons.fullscreen_rounded, color: Colors.white, size: 20),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ).animate().fadeIn(duration: 500.ms).scaleXY(begin: 0.95),
+
+                          const SizedBox(height: 20),
+
+                          // Confidence Badge
+                          if (!_isLoading && _error == null)
+                            _buildConfidenceBadge(settings)
+                                .animate()
+                                .fadeIn(delay: 300.ms, duration: 500.ms),
+
+                          const SizedBox(height: 16),
+
+                          // Demo Warning
+                          if (_isDemo)
+                            Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.science_rounded, color: Colors.orange, size: 22),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      settings.t('demo_mode'),
+                                      style: GoogleFonts.inter(fontSize: 13, color: Colors.orange, fontWeight: FontWeight.w500),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ).animate().fadeIn(delay: 400.ms, duration: 500.ms),
+
+                          if (_isDemo) const SizedBox(height: 16),
+
+                          // Result Section
+                          if (_isLoading)
+                            _buildLoadingState(settings)
+                          else if (_error != null)
+                            _buildErrorState(settings)
+                          else
+                            _isEditing ? _buildEditableText(settings) : _buildResultText(settings),
+
+                          const SizedBox(height: 24),
+
+                          // Copy button
+                          if (!_isLoading && _recognizedText.isNotEmpty)
+                            _buildBottomButton(
+                              icon: Icons.copy_all_rounded,
+                              label: settings.t('copy'),
+                              color: const Color(0xFF6C63FF),
+                              onTap: () => _copyText(settings),
+                            ).animate().fadeIn(delay: 600.ms, duration: 500.ms).slideY(begin: 0.2),
+
+                          // Edit & Convert row
+                          if (!_isLoading && _recognizedText.isNotEmpty) const SizedBox(height: 12),
+                          if (!_isLoading && _recognizedText.isNotEmpty)
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _buildBottomButton(
+                                    icon: _isEditing ? Icons.check_rounded : Icons.edit_rounded,
+                                    label: _isEditing ? settings.t('save') : settings.t('edit'),
+                                    color: const Color(0xFF7C4DFF),
+                                    onTap: _toggleEdit,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: _buildBottomButton(
+                                    icon: Icons.translate_rounded,
+                                    label: UzbekConverter.isCyrillic(_recognizedText)
+                                        ? settings.t('to_latin')
+                                        : settings.t('to_cyrillic'),
+                                    color: const Color(0xFFFF6D00),
+                                    onTap: _convertText,
+                                  ),
+                                ),
+                              ],
+                            ).animate().fadeIn(delay: 700.ms, duration: 500.ms).slideY(begin: 0.2),
+
+                          const SizedBox(height: 32),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildConfidenceBadge(SettingsService settings) {
+    final Color badgeColor;
+    final String label;
+    if (_confidence >= 0.9) {
+      badgeColor = const Color(0xFF00E676);
+      label = settings.t('high_accuracy');
+    } else if (_confidence >= 0.7) {
+      badgeColor = Colors.orange;
+      label = settings.t('mid_accuracy');
+    } else {
+      badgeColor = Colors.redAccent;
+      label = settings.t('low_accuracy');
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: badgeColor.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: badgeColor.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.analytics_rounded, color: badgeColor, size: 20),
+          const SizedBox(width: 8),
+          Text(
+            '$label: ${(_confidence * 100).toStringAsFixed(1)}%',
+            style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: badgeColor),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Прогресс-виджет для асинхронного OCR.
+  ///
+  /// Показывает:
+  ///   - Анимированный LinearProgressIndicator с процентами.
+  ///   - Название текущего этапа (например, "Распознавание Dual-Reader").
+  ///   - Обычный spinner если прогресс = 0 (ожидание в очереди).
+  Widget _buildLoadingState(SettingsService settings) {
+    final bool hasProgress = _ocrProgress > 0;
+    final bool isAsync = settings.useAsyncOcr;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 32),
+        child: Column(
+          children: [
+            // Иконка состояния
+            if (hasProgress)
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(
+                    width: 72,
+                    height: 72,
+                    child: CircularProgressIndicator(
+                      value: _ocrProgress / 100,
+                      color: const Color(0xFF6C63FF),
+                      backgroundColor: const Color(0xFF6C63FF).withValues(alpha: 0.15),
+                      strokeWidth: 5,
+                    ),
+                  ),
+                  Text(
+                    '$_ocrProgress%',
+                    style: GoogleFonts.inter(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF6C63FF),
+                    ),
+                  ),
+                ],
+              )
+            else
+              const SizedBox(
+                width: 52,
+                height: 52,
+                child: CircularProgressIndicator(
+                  color: Color(0xFF6C63FF),
+                  strokeWidth: 3,
+                ),
+              ),
+
+            const SizedBox(height: 20),
+
+            // Сообщение о текущем этапе
+            Text(
+              _ocrMessage.isNotEmpty ? _ocrMessage : settings.t('loading'),
+              style: GoogleFonts.inter(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: settings.textColor,
+              ),
+              textAlign: TextAlign.center,
+            ),
+
+            const SizedBox(height: 8),
+
+            // Подсказка режима
+            Text(
+              isAsync
+                  ? settings.t('async_mode_hint')  // FIX #11: убрали хардкод "Асинх режим (Celery + Redis)"
+                  : settings.t('please_wait'),
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: settings.subtitleColor.withValues(alpha: 0.6),
+              ),
+            ),
+
+            // LinearProgressIndicator для async-режима
+            if (isAsync) ...[
+              const SizedBox(height: 16),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: LinearProgressIndicator(
+                  value: hasProgress ? _ocrProgress / 100 : null,
+                  minHeight: 6,
+                  backgroundColor: const Color(0xFF6C63FF).withValues(alpha: 0.12),
+                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF6C63FF)),
+                ),
+              ),
+              const SizedBox(height: 8),
+              // Название этапа (stage)
+              Text(
+                _stageLabel(_ocrStage),
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: const Color(0xFF6C63FF).withValues(alpha: 0.7),
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    ).animate().fadeIn(duration: 500.ms);
+  }
+
+  /// Преобразует machine-название этапа в человечески читаемый текст.
+  String _stageLabel(String stage) {
+    switch (stage) {
+      case 'pending':          return 'Очередь задач...'; 
+      case 'started':          return 'Воркер запускается...';
+      case 'loading_image':    return 'Загрузка изображения...';
+      case 'loading_models':   return 'Инициализация OCR-моделей...';
+      case 'text_detection':   return 'CRAFT: обнаружение текстовых блоков...';
+      case 'ocr_recognition':  return 'Распознавание (Dual-Reader)...';
+      case 'normalization':    return 'Нормализация гомоглифов...';
+      case 'spell_correction': return 'Исправление орфографии...';
+      case 'script_conversion':return 'Конвертация алфавита...';
+      case 'success':          return 'Готово ✔';
+      default:                 return stage;
+    }
+  }
+
+  Widget _buildErrorState(SettingsService settings) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 40),
+        child: Column(
+          children: [
+            const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 56),
+            const SizedBox(height: 16),
+            Text(settings.t('error'), style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.redAccent)),
+            const SizedBox(height: 8),
+            Text(_error!, style: GoogleFonts.inter(fontSize: 14, color: settings.subtitleColor), textAlign: TextAlign.center),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: _performOCR,
+              icon: const Icon(Icons.refresh_rounded),
+              label: Text(settings.t('retry')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResultText(SettingsService settings) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: settings.cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: settings.borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.text_fields_rounded, color: Color(0xFF6C63FF), size: 22),
+              const SizedBox(width: 10),
+              Text(settings.t('detected_text'), style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: settings.textColor)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SelectableText(
+            _recognizedText,
+            style: GoogleFonts.inter(fontSize: 15, color: settings.textColor.withValues(alpha: 0.85), height: 1.7),
+          ),
+        ],
+      ),
+    ).animate().fadeIn(delay: 400.ms, duration: 600.ms).slideY(begin: 0.1);
+  }
+
+  Widget _buildEditableText(SettingsService settings) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: settings.cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF7C4DFF).withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.edit_rounded, color: Color(0xFF7C4DFF), size: 22),
+              const SizedBox(width: 10),
+              Text(settings.t('edit'), style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: settings.textColor)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _editController,
+            maxLines: null,
+            style: GoogleFonts.inter(fontSize: 15, color: settings.textColor.withValues(alpha: 0.85), height: 1.7),
+            decoration: InputDecoration(
+              border: InputBorder.none,
+              hintText: settings.t('edit_hint'),
+              hintStyle: GoogleFonts.inter(color: settings.subtitleColor.withValues(alpha: 0.4)),
+            ),
+          ),
+        ],
+      ),
+    ).animate().fadeIn(duration: 300.ms);
+  }
+
+  Widget _buildBottomButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            color: color.withValues(alpha: 0.12),
+            border: Border.all(color: color.withValues(alpha: 0.3)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 22),
+              const SizedBox(width: 8),
+              Text(label, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w600, color: color)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Fullscreen Image Viewer ─────────────────────────────────────────────────
+
+class _FullscreenImagePage extends StatelessWidget {
+  final Uint8List imageBytes;
+
+  const _FullscreenImagePage({required this.imageBytes});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          // Pinch-to-zoom image
+          GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: Center(
+              child: Hero(
+                tag: 'ocr_image',
+                child: InteractiveViewer(
+                  minScale: 0.5,
+                  maxScale: 5.0,
+                  child: Image.memory(
+                    imageBytes,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // Close button
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.6),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white24),
+                    ),
+                    child: const Icon(Icons.close_rounded, color: Colors.white, size: 22),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // Hint
+          SafeArea(
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 24),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '🔍  Pinch to zoom',
+                    style: GoogleFonts.inter(fontSize: 13, color: Colors.white60),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

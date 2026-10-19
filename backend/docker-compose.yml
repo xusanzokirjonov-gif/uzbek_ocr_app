@@ -1,0 +1,239 @@
+# ─── Uzbek OCR — Docker Compose (Async Stack) ────────────────────────────────
+#
+# Этот файл описывает полный стек для локального запуска и разработки
+# асинхронной архитектуры OCR:
+#
+#   ┌────────────────────────────────────────────────────────────────┐
+#   │                       Docker Compose Stack                     │
+#   │                                                                │
+#   │   ┌──────────────┐   ┌──────────────┐   ┌──────────────────┐  │
+#   │   │     api      │   │    worker    │   │      redis       │  │
+#   │   │  FastAPI :8000│──►│ Celery Worker│◄──│  Redis :6379     │  │
+#   │   │  POST /ocr/v2│   │ run_ocr_task │   │  Broker+Backend  │  │
+#   │   │  GET /status │   │  EasyOCR     │   │                  │  │
+#   │   └──────────────┘   └──────────────┘   └──────────────────┘  │
+#   │          │                   │                   │             │
+#   │          └───────────────────┴───────────────────┘            │
+#   │                       Shared Volume                            │
+#   │                    (temp OCR uploads)                          │
+#   └────────────────────────────────────────────────────────────────┘
+#
+# Запуск:
+#   docker-compose up --build
+#
+# Остановка:
+#   docker-compose down
+#
+# Просмотр логов конкретного сервиса:
+#   docker-compose logs -f worker
+#
+# Масштабирование воркеров (2 параллельных OCR-процесса):
+#   docker-compose up --scale worker=2
+
+# ─── Переменные окружения (общие для api и worker) ────────────────────────────
+#
+# x-common-env — YAML-якорь (anchor) для переиспользования конфигурации.
+# Оба сервиса (api, worker) используют одинаковый REDIS_URL.
+x-common-env: &common-env
+  # URL Redis-брокера. В Compose сервисы доступны по именам (redis).
+  REDIS_URL: redis://redis:6379/0
+  # Переменные Python
+  PYTHONDONTWRITEBYTECODE: "1"
+  PYTHONUNBUFFERED: "1"
+  # Директория кэша EasyOCR-моделей (внутри контейнера)
+  EASYOCR_MODULE_PATH: /app/model
+
+# ─── Именованные тома ─────────────────────────────────────────────────────────
+#
+# ocr_uploads — общий том между api и worker.
+#   api сохраняет загруженный файл → worker считывает его для OCR.
+#   Без общего тома worker не сможет найти файл (разные файловые системы).
+#
+# easyocr_models — кэш EasyOCR-моделей.
+#   Модели загружаются при первом запуске (~1 ГБ).
+#   Том предотвращает повторную загрузку при перезапуске контейнеров.
+#
+# redis_data — персистентность Redis при перезапуске.
+volumes:
+  ocr_uploads:
+    driver: local
+  easyocr_models:
+    driver: local
+  redis_data:
+    driver: local
+
+services:
+  # ─── Redis: брокер сообщений и хранилище результатов ────────────────────────
+  #
+  # Redis выполняет две роли:
+  #   1. Broker (очередь задач): Celery публикует задачи, воркер потребляет.
+  #   2. Result Backend: воркер сохраняет результаты, API читает их.
+  #
+  # Официальный образ Redis 7 (Alpine — минимальный, ~7 МБ).
+  redis:
+    image: redis:7-alpine
+    container_name: uzbek_ocr_redis
+    restart: unless-stopped
+    
+    # Конфигурация Redis без сохранения RDB на диск
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+      --loglevel warning
+    
+    # Примечания по параметрам:
+    #   --maxmemory 512mb        — ограничение памяти (важно на Dev-машинах)
+    #   --maxmemory-policy       — при переполнении удалять давно неиспользуемые ключи
+    #   --save 60 1              — RDB-снэпшот каждые 60 сек если ≥1 изменение
+    #   --loglevel warning       — минимальные логи (info → слишком шумно)
+    
+    ports:
+      - "6379:6379"   # Для локального подключения redis-cli / отладки
+    
+    volumes:
+      - redis_data:/data   # Персистентность данных Redis
+    
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # ─── FastAPI: REST API сервер ─────────────────────────────────────────────────
+  #
+  # Принимает HTTP-запросы, валидирует файлы, ставит задачи в очередь.
+  # НЕ выполняет OCR напрямую — только координирует работу.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # target: runtime — используем финальный stage из multi-stage Dockerfile
+      target: runtime
+    
+    container_name: uzbek_ocr_api
+    restart: unless-stopped
+    user: root
+    
+    environment:
+      <<: *common-env  # Наследуем общие переменные (REDIS_URL и т.д.)
+    
+    ports:
+      - "8000:8000"   # Основной порт API
+    
+    volumes:
+      # Общий том для временных файлов: api пишет, worker читает
+      - ocr_uploads:/tmp/uzbek_ocr_uploads
+      # Модели EasyOCR (для синхронного /ocr эндпоинта)
+      - easyocr_models:/app/model
+    
+    depends_on:
+      redis:
+        condition: service_healthy   # Ждём успешного healthcheck Redis
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s   # EasyOCR загружается ~60 сек при первом старте
+    
+    # Переопределяем команду из Dockerfile — оставляем uvicorn с 1 воркером.
+    # reload=false: hot-reload несовместим с EasyOCR (модели в памяти)
+    command: >
+      uvicorn main:app
+      --host 0.0.0.0
+      --port 8000
+      --workers 1
+      --log-level info
+
+  # ─── Celery Worker: фоновая OCR-обработка ────────────────────────────────────
+  #
+  # Отдельный процесс, который:
+  #   1. Слушает очередь Redis на наличие OCR-задач.
+  #   2. Загружает EasyOCR-модели один раз при старте (singleton).
+  #   3. Выполняет распознавание текста асинхронно.
+  #   4. Сохраняет результат обратно в Redis.
+  #
+  # Воркер использует тот же Docker-образ что и api, но с другой командой запуска.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    
+    container_name: uzbek_ocr_worker
+    restart: unless-stopped
+    user: root
+    
+    environment:
+      <<: *common-env
+      # Celery-воркер: имя воркера (видно в логах и flower-мониторинге)
+      C_FORCE_ROOT: "true"   # Разрешить запуск от root (в Docker это нормально)
+    
+    volumes:
+      # КРИТИЧНО: тот же том ocr_uploads что и у api
+      # api: /tmp/uzbek_ocr_uploads/<uuid>.jpg (write)
+      # worker: /tmp/uzbek_ocr_uploads/<uuid>.jpg (read)
+      - ocr_uploads:/tmp/uzbek_ocr_uploads
+      # Кэш EasyOCR-моделей (не скачивать повторно)
+      - easyocr_models:/app/model
+    
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "celery", "-A", "ocr_tasks", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # ── Команда запуска Celery-воркера ─────────────────────────────────────────
+    #
+    # Параметры celery worker:
+    #   -A ocr_tasks          — модуль с Celery-приложением (ocr_tasks.celery_app)
+    #   --loglevel=info       — уровень логирования воркера
+    #   --concurrency=1       — 1 поток обработки (EasyOCR не thread-safe!)
+    #   -Q celery             — очередь задач (по умолчанию "celery")
+    #   -n worker@%h          — имя воркера (%h = hostname контейнера)
+    #
+    # ВАЖНО: --concurrency=1 обязателен для EasyOCR!
+    # PyTorch + EasyOCR не поддерживают многопоточность внутри одного процесса.
+    # Для параллельной обработки — запускайте несколько контейнеров (--scale worker=N).
+    command: >
+      celery -A ocr_tasks
+      worker
+      --loglevel=info
+      --concurrency=1
+      -Q celery
+      -n worker@%h
+
+  # ─── Flower: мониторинг Celery (опционально) ─────────────────────────────────
+  #
+  # Flower — веб-интерфейс для мониторинга Celery:
+  #   - Список задач и их статусы
+  #   - Статистика воркеров
+  #   - Возможность отмены задач (revoke)
+  #
+  # Доступ: http://localhost:5555
+  # Раскомментируйте для использования в разработке.
+  #
+  # flower:
+  #   image: mher/flower:2.0.1
+  #   container_name: uzbek_ocr_flower
+  #   environment:
+  #     <<: *common-env
+  #     FLOWER_BROKER_API: http://guest:guest@redis:6379
+  #   ports:
+  #     - "5555:5555"
+  #   command: >
+  #     celery --broker=redis://redis:6379/0 flower
+  #     --port=5555
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy

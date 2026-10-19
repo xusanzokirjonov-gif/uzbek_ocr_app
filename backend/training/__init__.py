@@ -1,0 +1,1 @@
+# Uzbek OCR Training Package
