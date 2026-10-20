@@ -9,6 +9,7 @@ import '../services/history_service.dart';
 import '../services/converter_service.dart';
 import '../services/server_discovery_service.dart';
 import '../services/settings_service.dart';
+import '../widgets/ios26_glass.dart';
 
 class ResultScreen extends StatefulWidget {
   final Uint8List imageBytes;
@@ -185,41 +186,62 @@ class _ResultScreenState extends State<ResultScreen> {
       builder: (context, settings, _) {
         final sys = MediaQuery.platformBrightnessOf(context);
         settings.updateSystemBrightness(sys);
+        final bool isDark = settings.isDark(sys);
+
         return Scaffold(
-          body: AnimatedContainer(
-            duration: const Duration(milliseconds: 400),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: settings.backgroundGradient,
-              ),
-            ),
+          body: IOS26AuroraBackground(
+            isDark: isDark,
             child: SafeArea(
               child: Column(
                 children: [
-                  // App Bar
+                  // Glass App Bar
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     child: Row(
                       children: [
-                        IconButton(
-                          onPressed: () => Navigator.pop(context),
-                          icon: Icon(Icons.arrow_back_ios_rounded, color: settings.textColor),
+                        GestureDetector(
+                          onTap: () => Navigator.pop(context),
+                          child: Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
+                              border: Border.all(
+                                color: isDark ? Colors.white.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.6),
+                                width: 0.8,
+                              ),
+                            ),
+                            child: Icon(Icons.arrow_back_ios_new_rounded, size: 16, color: settings.textColor),
+                          ),
                         ),
+                        const SizedBox(width: 14),
                         Text(
                           settings.t('result'),
                           style: GoogleFonts.inter(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w700,
+                            fontSize: 21,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.4,
                             color: settings.textColor,
                           ),
                         ),
                         const Spacer(),
                         if (!_isLoading && _recognizedText.isNotEmpty)
-                          IconButton(
-                            onPressed: () => _copyText(settings),
-                            icon: Icon(Icons.copy_rounded, color: settings.subtitleColor),
+                          GestureDetector(
+                            onTap: () => _copyText(settings),
+                            child: Container(
+                              width: 38,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
+                                border: Border.all(
+                                  color: isDark ? Colors.white.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.6),
+                                  width: 0.8,
+                                ),
+                              ),
+                              child: Icon(Icons.copy_rounded, size: 18, color: settings.subtitleColor),
+                            ),
                           ),
                       ],
                     ),
@@ -372,21 +394,39 @@ class _ResultScreenState extends State<ResultScreen> {
       label = settings.t('low_accuracy');
     }
 
+    final bool isDark = settings.isDark(settings.systemBrightness);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: badgeColor.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: badgeColor.withValues(alpha: 0.3)),
+        color: badgeColor.withValues(alpha: isDark ? 0.16 : 0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: badgeColor.withValues(alpha: 0.35), width: 0.9),
+        boxShadow: [
+          BoxShadow(
+            color: badgeColor.withValues(alpha: 0.14),
+            blurRadius: 16,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.analytics_rounded, color: badgeColor, size: 20),
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: badgeColor,
+              boxShadow: [
+                BoxShadow(color: badgeColor.withValues(alpha: 0.8), blurRadius: 6),
+              ],
+            ),
+          ),
           const SizedBox(width: 8),
           Text(
             '$label: ${(_confidence * 100).toStringAsFixed(1)}%',
-            style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: badgeColor),
+            style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w700, color: badgeColor),
           ),
         ],
       ),
@@ -539,29 +579,46 @@ class _ResultScreenState extends State<ResultScreen> {
   }
 
   Widget _buildResultText(SettingsService settings) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: settings.cardColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: settings.borderColor),
-      ),
+    final bool isDark = settings.isDark(settings.systemBrightness);
+    return IOS26GlassCard(
+      isDark: isDark,
+      borderRadius: 24,
+      padding: const EdgeInsets.all(22),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.text_fields_rounded, color: Color(0xFF6C63FF), size: 22),
-              const SizedBox(width: 10),
-              Text(settings.t('detected_text'), style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: settings.textColor)),
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  gradient: const LinearGradient(colors: [Color(0xFF7928CA), Color(0xFF00DFD8)]),
+                ),
+                child: const Icon(Icons.text_fields_rounded, color: Colors.white, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                settings.t('detected_text'),
+                style: GoogleFonts.inter(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                  color: settings.textColor,
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           SelectableText(
             _recognizedText,
-            style: GoogleFonts.inter(fontSize: 15, color: settings.textColor.withValues(alpha: 0.85), height: 1.7),
+            style: GoogleFonts.inter(
+              fontSize: 15.5,
+              fontWeight: FontWeight.w400,
+              color: settings.textColor.withValues(alpha: 0.9),
+              height: 1.7,
+              letterSpacing: -0.1,
+            ),
           ),
         ],
       ),
@@ -569,30 +626,42 @@ class _ResultScreenState extends State<ResultScreen> {
   }
 
   Widget _buildEditableText(SettingsService settings) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: settings.cardColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF7C4DFF).withValues(alpha: 0.3)),
-      ),
+    final bool isDark = settings.isDark(settings.systemBrightness);
+    return IOS26GlassCard(
+      isDark: isDark,
+      borderRadius: 24,
+      padding: const EdgeInsets.all(22),
+      customBorder: Border.all(color: const Color(0xFF7928CA).withValues(alpha: 0.4), width: 1.2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.edit_rounded, color: Color(0xFF7C4DFF), size: 22),
-              const SizedBox(width: 10),
-              Text(settings.t('edit'), style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: settings.textColor)),
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  gradient: const LinearGradient(colors: [Color(0xFF7928CA), Color(0xFFB388FF)]),
+                ),
+                child: const Icon(Icons.edit_rounded, color: Colors.white, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                settings.t('edit'),
+                style: GoogleFonts.inter(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.3,
+                  color: settings.textColor,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _editController,
             maxLines: null,
-            style: GoogleFonts.inter(fontSize: 15, color: settings.textColor.withValues(alpha: 0.85), height: 1.7),
+            style: GoogleFonts.inter(fontSize: 15.5, color: settings.textColor.withValues(alpha: 0.85), height: 1.7),
             decoration: InputDecoration(
               border: InputBorder.none,
               hintText: settings.t('edit_hint'),
@@ -610,26 +679,40 @@ class _ResultScreenState extends State<ResultScreen> {
     required Color color,
     required VoidCallback onTap,
   }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            color: color.withValues(alpha: 0.12),
-            border: Border.all(color: color.withValues(alpha: 0.3)),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, color: color, size: 22),
-              const SizedBox(width: 8),
-              Text(label, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w600, color: color)),
-            ],
-          ),
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        onTap();
+      },
+      child: Container(
+        height: 52,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          color: color.withValues(alpha: 0.16),
+          border: Border.all(color: color.withValues(alpha: 0.35), width: 0.9),
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: 0.12),
+              blurRadius: 18,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.2,
+                color: color,
+              ),
+            ),
+          ],
         ),
       ),
     );

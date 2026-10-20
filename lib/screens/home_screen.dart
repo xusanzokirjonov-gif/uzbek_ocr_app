@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../services/server_discovery_service.dart';
 import '../services/settings_service.dart';
+import '../widgets/ios26_glass.dart';
 import 'result_screen.dart';
 import 'history_screen.dart';
 import 'converter_screen.dart';
@@ -23,15 +24,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _pickImage(ImageSource source) async {
     try {
-      final XFile? pickedFile = await _picker.pickImage(
-        source: source,
-      );
-
+      final XFile? pickedFile = await _picker.pickImage(source: source);
       if (pickedFile == null) return;
 
-      // Read bytes directly from the picked XFile (vital on iOS to ensure lazy asset loading)
       final Uint8List bytes = await pickedFile.readAsBytes();
-
       if (!mounted) return;
 
       Navigator.push(
@@ -60,271 +56,176 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (context, settings, _) {
         final sys = MediaQuery.platformBrightnessOf(context);
         settings.updateSystemBrightness(sys);
+        final bool isDark = settings.isDark(sys);
+
         return Scaffold(
-          body: AnimatedContainer(
-            duration: const Duration(milliseconds: 400),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: settings.backgroundGradient,
-              ),
-            ),
+          body: IOS26AuroraBackground(
+            isDark: isDark,
             child: SafeArea(
               child: Column(
                 children: [
-                  // App Bar
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          settings.t('app_name'),
-                          style: GoogleFonts.inter(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w800,
-                            color: settings.textColor,
-                          ),
-                        ),
-                        Row(
-                          children: [
-                            IconButton(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(builder: (_) => const HistoryScreen()),
-                                );
-                              },
-                              icon: Icon(Icons.history_rounded, color: settings.subtitleColor, size: 26),
-                            ),
-                            IconButton(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                                );
-                              },
-                              icon: Icon(Icons.settings_rounded, color: settings.subtitleColor, size: 26),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ).animate().fadeIn(duration: 500.ms).slideY(begin: -0.3),
-
-                  // Server Connection Status Pill
-                  Consumer<ServerDiscoveryService>(
-                    builder: (context, discovery, _) {
-                      final isFound = discovery.isFound;
-                      final isSearching = discovery.isSearching;
-                      final Color pillColor = isFound
-                          ? const Color(0xFF00BFA5)
-                          : (isSearching ? const Color(0xFFFFA726) : const Color(0xFFEF5350));
-                      final IconData pillIcon = isFound
-                          ? Icons.cloud_done_rounded
-                          : (isSearching ? Icons.wifi_find_rounded : Icons.cloud_off_rounded);
-                      final String pillText = isFound
-                          ? 'Сервер: ${(discovery.discoveredUrl ?? settings.serverUrl).replaceAll('http://', '')}'
-                          : (isSearching
-                              ? (settings.isRussian ? 'Поиск сервера...' : 'Server qidirilmoqda...')
-                              : (settings.isRussian ? 'Сервер не найден (настроить)' : 'Server topilmadi (sozlash)'));
-
-                      return GestureDetector(
+                  // ── Top Glass App Bar ─────────────────────────────────────
+                  IOS26GlassAppBar(
+                    title: settings.t('app_name'),
+                    isDark: isDark,
+                    actions: [
+                      _buildHeaderCircleButton(
+                        icon: Icons.history_rounded,
+                        isDark: isDark,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const HistoryScreen()),
+                          );
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      _buildHeaderCircleButton(
+                        icon: Icons.tune_rounded,
+                        isDark: isDark,
                         onTap: () {
                           Navigator.push(
                             context,
                             MaterialPageRoute(builder: (_) => const SettingsScreen()),
                           );
                         },
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: pillColor.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: pillColor.withValues(alpha: 0.3),
-                              width: 1,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (isSearching)
-                                SizedBox(
-                                  width: 12,
-                                  height: 12,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: pillColor,
-                                  ),
-                                )
-                              else
-                                Icon(pillIcon, size: 14, color: pillColor),
-                              const SizedBox(width: 7),
-                              Text(
-                                pillText,
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: pillColor,
-                                ),
-                              ),
-                              const SizedBox(width: 4),
-                              Icon(Icons.chevron_right_rounded, size: 14, color: pillColor),
-                            ],
-                          ),
-                        ),
-                      ).animate().fadeIn(duration: 400.ms);
+                      ),
+                    ],
+                  ).animate().fadeIn(duration: 400.ms).slideY(begin: -0.2),
+
+                  // ── Dynamic Island Status Capsule ─────────────────────────
+                  Consumer<ServerDiscoveryService>(
+                    builder: (context, discovery, _) {
+                      final isFound = discovery.isFound;
+                      final isSearching = discovery.isSearching;
+                      final Color statusColor = isFound
+                          ? const Color(0xFF00F5D4)
+                          : (isSearching ? const Color(0xFFFFB703) : const Color(0xFFFF4D6D));
+                      final IconData statusIcon = isFound
+                          ? Icons.wifi_tethering_rounded
+                          : (isSearching ? Icons.radar_rounded : Icons.wifi_off_rounded);
+                      final String mainText = isFound
+                          ? (discovery.discoveredUrl ?? settings.serverUrl)
+                              .replaceAll('http://', '')
+                          : (isSearching
+                              ? (settings.isRussian ? 'Поиск узла...' : 'Qidirilmoqda...')
+                              : (settings.isRussian ? 'Офлайн (настроить)' : 'Ulanmagan'));
+                      final String? subText = isFound ? 'LIVE' : null;
+
+                      return IOS26DynamicIsland(
+                        text: mainText,
+                        subtext: subText,
+                        icon: statusIcon,
+                        statusColor: statusColor,
+                        isLive: isFound,
+                        isPulsing: isFound || isSearching,
+                        isDark: isDark,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                          );
+                        },
+                      );
                     },
-                  ),
+                  ).animate().fadeIn(delay: 150.ms, duration: 400.ms),
 
-                  const SizedBox(height: 8),
-
-                  // Hero Section
+                  // ── Scrollable Body Content ───────────────────────────────
                   Expanded(
                     child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.only(top: 8, bottom: 20),
                       child: Column(
                         children: [
-                          // Animated Icon
-                          Container(
-                            width: 100,
-                            height: 100,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              gradient: const LinearGradient(
-                                colors: [Color(0xFF6C63FF), Color(0xFF00D9FF)],
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(0xFF6C63FF).withValues(alpha: 0.4),
-                                  blurRadius: 30,
-                                  spreadRadius: 5,
-                                ),
-                              ],
-                            ),
-                            child: const Icon(
-                              Icons.document_scanner_rounded,
-                              color: Colors.white,
-                              size: 56,
-                            ),
-                          )
-                              .animate(onPlay: (c) => c.repeat(reverse: true))
-                              .scaleXY(end: 1.05, duration: 2000.ms, curve: Curves.easeInOut)
-                              .animate()
-                              .fadeIn(duration: 800.ms)
-                              .scaleXY(begin: 0.5),
-
-                          const SizedBox(height: 32),
-
-                          // Title
-                          Text(
-                            settings.t('scan_text'),
-                            style: GoogleFonts.inter(
-                              fontSize: 28,
-                              fontWeight: FontWeight.w800,
-                              color: settings.textColor,
-                            ),
-                            textAlign: TextAlign.center,
-                          ).animate().fadeIn(delay: 200.ms, duration: 600.ms),
+                          // ── Holographic OCR Scanner Viewport ──────────────
+                          IOS26HoloScanner(
+                            title: settings.t('scan_text'),
+                            subtitle: 'AI SPATIAL OCR 2026',
+                            isDark: isDark,
+                            onCameraTap: () => _pickImage(ImageSource.camera),
+                            onGalleryTap: () => _pickImage(ImageSource.gallery),
+                          ).animate().fadeIn(delay: 250.ms, duration: 600.ms).scaleXY(begin: 0.95),
 
                           const SizedBox(height: 12),
 
-                          // Subtitle
-                          Text(
-                            settings.t('scan_subtitle'),
-                            style: GoogleFonts.inter(
-                              fontSize: 15,
-                              color: settings.subtitleColor,
-                              height: 1.5,
-                            ),
-                            textAlign: TextAlign.center,
-                          ).animate().fadeIn(delay: 400.ms, duration: 600.ms),
-
-                          const SizedBox(height: 48),
-
-                          // Camera Button
-                          _buildActionButton(
+                          // ── Primary Action Buttons (iOS 26 Liquid Glass) ─
+                          IOS26LiquidButton(
                             icon: Icons.camera_alt_rounded,
                             label: settings.t('camera'),
                             subtitle: settings.t('camera_sub'),
-                            gradient: const [Color(0xFF6C63FF), Color(0xFF5A52E0)],
+                            gradientColors: const [Color(0xFF7928CA), Color(0xFF4361EE)],
+                            isDark: isDark,
                             onTap: () => _pickImage(ImageSource.camera),
-                            settings: settings,
-                          ).animate().fadeIn(delay: 600.ms, duration: 600.ms).slideX(begin: -0.2),
+                          ).animate().fadeIn(delay: 350.ms, duration: 500.ms).slideY(begin: 0.1),
 
-                          const SizedBox(height: 16),
-
-                          // Gallery Button
-                          _buildActionButton(
+                          IOS26LiquidButton(
                             icon: Icons.photo_library_rounded,
                             label: settings.t('gallery'),
                             subtitle: settings.t('gallery_sub'),
-                            gradient: const [Color(0xFF00D9FF), Color(0xFF00B4D8)],
+                            gradientColors: const [Color(0xFF00DFD8), Color(0xFF007CF0)],
+                            isDark: isDark,
                             onTap: () => _pickImage(ImageSource.gallery),
-                            settings: settings,
-                          ).animate().fadeIn(delay: 800.ms, duration: 600.ms).slideX(begin: 0.2),
+                          ).animate().fadeIn(delay: 450.ms, duration: 500.ms).slideY(begin: 0.1),
 
-                          const SizedBox(height: 16),
-
-                          // Converter Button
-                          _buildActionButton(
+                          IOS26LiquidButton(
                             icon: Icons.translate_rounded,
                             label: settings.t('converter'),
                             subtitle: settings.t('converter_sub'),
-                            gradient: const [Color(0xFF7C4DFF), Color(0xFFB388FF)],
+                            gradientColors: const [Color(0xFFFF007A), Color(0xFF7928CA)],
+                            isDark: isDark,
                             onTap: () {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(builder: (_) => const ConverterScreen()),
                               );
                             },
-                            settings: settings,
-                          ).animate().fadeIn(delay: 1000.ms, duration: 600.ms).slideX(begin: -0.2),
+                          ).animate().fadeIn(delay: 550.ms, duration: 500.ms).slideY(begin: 0.1),
+
+                          const SizedBox(height: 14),
+
+                          // ── Spatial Info Card ─────────────────────────────
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: IOS26GlassCard(
+                              isDark: isDark,
+                              borderRadius: 20,
+                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: isDark
+                                          ? const Color(0xFF00F5D4).withValues(alpha: 0.15)
+                                          : const Color(0xFF6C63FF).withValues(alpha: 0.12),
+                                    ),
+                                    child: Icon(
+                                      Icons.auto_awesome_rounded,
+                                      size: 18,
+                                      color: isDark ? const Color(0xFF00F5D4) : const Color(0xFF6C63FF),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Text(
+                                      settings.t('both_scripts'),
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                        letterSpacing: -0.2,
+                                        color: isDark ? Colors.white70 : const Color(0xFF4B5563),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ).animate().fadeIn(delay: 650.ms, duration: 500.ms),
                         ],
                       ),
                     ),
                   ),
-
-                  // Bottom Info
-                  Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                      decoration: BoxDecoration(
-                        color: settings.cardColor,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: settings.borderColor),
-                        boxShadow: settings.brightness == Brightness.dark
-                            ? []
-                            : [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.02),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 3),
-                                ),
-                              ],
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Icons.info_outline_rounded, color: settings.subtitleColor, size: 20),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              settings.t('both_scripts'),
-                              style: GoogleFonts.inter(
-                                fontSize: 13,
-                                color: settings.subtitleColor,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ).animate().fadeIn(delay: 1000.ms, duration: 600.ms),
                 ],
               ),
             ),
@@ -334,89 +235,32 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildActionButton({
+  Widget _buildHeaderCircleButton({
     required IconData icon,
-    required String label,
-    required String subtitle,
-    required List<Color> gradient,
+    required bool isDark,
     required VoidCallback onTap,
-    required SettingsService settings,
   }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            gradient: LinearGradient(
-              colors: settings.brightness == Brightness.dark
-                  ? [
-                      gradient[0].withValues(alpha: 0.15),
-                      gradient[1].withValues(alpha: 0.05),
-                    ]
-                  : [
-                      gradient[0].withValues(alpha: 0.06),
-                      gradient[1].withValues(alpha: 0.02),
-                    ],
-            ),
-            border: Border.all(
-              color: settings.brightness == Brightness.dark
-                  ? gradient[0].withValues(alpha: 0.3)
-                  : gradient[0].withValues(alpha: 0.2),
-              width: 1.2,
-            ),
-            boxShadow: settings.brightness == Brightness.dark
-                ? []
-                : [
-                    BoxShadow(
-                      color: gradient[0].withValues(alpha: 0.05),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.05),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.15)
+                : Colors.white.withValues(alpha: 0.6),
+            width: 0.8,
           ),
-          child: Row(
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  gradient: LinearGradient(colors: gradient),
-                ),
-                child: Icon(icon, color: Colors.white, size: 26),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: GoogleFonts.inter(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        color: settings.textColor,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: GoogleFonts.inter(
-                        fontSize: 13,
-                        color: settings.subtitleColor,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Icons.arrow_forward_ios_rounded, color: gradient[0], size: 20),
-            ],
-          ),
+        ),
+        child: Icon(
+          icon,
+          size: 20,
+          color: isDark ? Colors.white : const Color(0xFF1E2235),
         ),
       ),
     );
